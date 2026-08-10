@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [ "main" ]
 
-# Give the workflow write permissions to commit the compiled PDF back to Git
 permissions:
   contents: write
 
@@ -38,3 +37,4 @@ jobs:
         with:
           commit_message: "docs(ci): update compiled ch1_framework.pdf [skip ci]"
           file_pattern: "ch1_framework.pdf"
+          add_options: '-f' # Force-adds PDF even if ignored in .gitignore

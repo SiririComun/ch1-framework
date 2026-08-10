@@ -11,6 +11,5 @@
 *.synctex.gz
 *.toc
 
-# Ignore intermediate PDFs, BUT keep ch1_framework.pdf tracked
+# Ignore all PDFs locally
 *.pdf
-!ch1_framework.pdf
