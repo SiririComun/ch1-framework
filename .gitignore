@@ -13,4 +13,3 @@
 
 # Ignore intermediate PDFs, BUT keep ch1_framework.pdf tracked
 *.pdf
-!ch1_framework.pdf
