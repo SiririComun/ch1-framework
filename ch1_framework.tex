@@ -99,7 +99,27 @@ La suite de caracterización en lazo cerrado (\texttt{04\_automated\_performance
 \end{itemize}
 
 \subsection{Proyección a Módulos de Localización Espacial}
+\label{subsec:proyeccion_localizador}
+
+La implementación y caracterización experimental de los repositorios \texttt{hw-xadc-dma-overlays} (Sección~\ref{subsec:hw_overlay}) y \texttt{sw-pynq-oscilloscope} (Sección~\ref{subsec:sw_oscilloscope}) constituyen la prueba de concepto que valida la solidez del marco de trabajo (\textit{framework}) co-diseñado. Los resultados confirman que la combinación de los entornos CERN Hog y AMD PYNQ permite construir instrumentación científica abierta de alto rendimiento, logrando transferencias deterministas por DMA a $1.75~\text{MB/s}$ y tasas de refresco interactivas de $53.3~\text{cuadros/s}$ sin generar cuellos de botella en la CPU ni en la interfaz gráfica.
+
+Un aspecto fundamental demostrado en este capítulo es el desacoplamiento arquitectónico entre la capa de hardware en la Lógica Programable (PL) y la capa de abstracción en software (PS):
+\begin{itemize}
+    \item \textbf{Infraestructura Consolidada e Invariante:} El flujo de transporte de datos impulsado por eventos (AXI4-Stream), el empaquetado de muestras (\texttt{tlast\_generator}), el motor AXI DMA sobre el bus de 64 bits AXI-HP0, la asignación de memoria contigua en Python (\texttt{StreamingXADC}) y la carga autónoma de artefactos (\texttt{HardwareLoader}) se mantendrán como la columna vertebral invariable del sistema.
+    \item \textbf{Escalabilidad hacia la Localización de Fuentes de Ondas:} En los capítulos siguientes, el módulo de prueba de canal único de la XADC se sustituirá por arreglos geométricos de sensores multicanal e integraciones con núcleos IP de procesamiento digital de señales (DSP) en la PL (Capítulo~2 y Capítulo~3). Debido a que la tubería (\textit{pipeline}) AXI DMA y la capa PYNQ son agnósticas al tipo de dato transmitido, la adición de algoritmos de estimación de ángulo de llegada (AoA) o diferencia de tiempo de llegada (TDOA) en hardware no requerirá reestructurar la capa de distribución en software ni la interfaz de usuario.
+\end{itemize}
+
+De este modo, el marco de trabajo no solo resuelve el problema de la falta de reproducibilidad y versionado en firmware FPGA, sino que garantiza que la plataforma completa para la localización espacial de fuentes de ondas se construya sobre una base metodológica probada, modular y completamente abierta.
 
 \section{Conclusiones del Capítulo}
+\label{sec:conclusiones_ch1}
+
+\begin{enumerate}
+    \item Se estableció una metodología de co-diseño hardware/software para instrumentación científica abierta basada en los entornos CERN Hog y AMD PYNQ, resolviendo la falta de trazabilidad y el desacoplamiento tradicional entre el desarrollo de firmware FPGA y las aplicaciones de usuario.
+    \item La integración de CERN Hog en el repositorio de hardware (\texttt{hw-xadc-dma-overlays}) permitió automatizar la construcción de proyectos en Vivado mediante scripts TCL y pipelines de CI/CD en GitHub Actions, garantizando que cada artefacto ejecutable (\texttt{.bit} y \texttt{.hwh}) esté vinculado de forma inequívoca al \textit{hash} de un commit de Git.
+    \item La capa de software (\texttt{sw-pynq-oscilloscope}), distribuida mediante PyPI, demostró la viabilidad de empaquetar plataformas SoC-FPGA como librerías estándar en Python. El módulo \texttt{HardwareLoader} elimina la necesidad de configuración manual de archivos de firmware al descargar autónomamente los mapas de bits requeridos desde los lanzamientos del repositorio de hardware.
+    \item El empaquetador VHDL diseñado (\texttt{tlast\_generator}) resolvió la limitación nativa de delimitación de paquetes del núcleo XADC, permitiendo transferencias continuas por AXI DMA hacia la memoria RAM compartida a $1.75~\text{MB/s}$ con una latencia de hardware medible a $100~\text{MHz}$ mediante el temporizador AXI.
+    \item La suite de caracterización en lazo cerrado validó la fidelidad del flujo de adquisición, alcanzando un ancho de banda analógico de $150.0~\text{kHz}$, una relación señal-ruido de $45.96~\text{dB}$ ($\text{ENOB} = 7.34~\text{bits}$), una precisión estática superior al $99.7\%$ y un despliegue gráfico fluido a $53.3~\text{FPS}$. Esta infraestructura validada servirá como la base operativa para la implementación del localizador espacial de fuentes de ondas en los capítulos posteriores.
+\end{enumerate}
 
 \end{document}
