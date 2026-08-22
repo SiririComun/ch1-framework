@@ -5,121 +5,437 @@
 \chapter{Marco de Trabajo (Framework)}
 \label{ch:framework}
 
-\section{Introducción}
-La instrumentación científica en laboratorios de física experimental enfrenta frecuentemente el desafío de la falta de reproducibilidad y el empaquetamiento propietario...
+% ==============================================================================
+% 1.1. INTRODUCCIÓN Y JUSTIFICACIÓN
+% ==============================================================================
+\section{Introducción y Justificación}
+\label{sec:intro_framework}
 
-\section{Marco Teórico}
-\subsection{Paradigma de Co-diseño Hardware/Software}
-\subsection{Filosofía y Ecosistema PYNQ}
-\subsection{Filosofía y Gestión DevOps con Hog}
+En este capítulo se establece el marco metodológico y tecnológico para el desarrollo de instrumentación científica reproducible basada en sistemas SoC-FPGA (\textit{System-on-Chip Field-Programmable Gate Array}). En la Sección~\ref{subsec:problema_fpga} se analiza la problemática recurrente en laboratorios de física respecto al versionado, la falta de trazabilidad y el acoplamiento rígido de hardware, mientras que en la Sección~\ref{subsec:objetivos_framework} se definen los objetivos y el alcance del ecosistema de co-diseño propuesto.
 
-\section{Metodología}
-\subsection{Estrategia de Repositorios Duales (HW/SW)}
-\subsection{Flujo de Trabajo CI/CD y Transducción AXI/DMA}
-\subsection{Justificación: Instrumentación Libre, Modular y Reusable}
+\subsection{El problema de la reproducibilidad y el acoplamiento en FPGA}
+\label{subsec:problema_fpga}
 
-\section{Resultados y Validación}
-\subsection{Plataforma de Adquisición: \texttt{hw-xadc-dma-overlays}}
-\label{subsec:hw_overlay}
+La instrumentación científica moderna en laboratorios de física experimental enfrenta crecientes demandas de ancho de banda, determinismo temporal y procesamiento concurrente en tiempo real. Aunque las plataformas basadas en FPGA ofrecen el paralelismo masivo y la latencia sub-microsegundo requeridos para la captura de eventos físicos rápidos, su adopción generalizada y sostenibilidad a largo plazo se ven seriamente obstaculizadas por tres desafíos críticos:
 
-Para validar el marco de trabajo propuesto y establecer una plataforma preliminar de pruebas para sistemas de adquisición de datos (DAQ), se desarrolló el repositorio de firmware \texttt{hw-xadc-dma-overlays}, orientado a la tarjeta SoC-FPGA PYNQ-Z2 (dispositivo Zynq-7000 \texttt{xc7z020clg400-1}). Este proyecto implementa una plataforma de adquisición en la Lógica Programable (PL) capaz de digitalizar señales analógicas a alta velocidad y transferirlas hacia la memoria DDR del procesador (PS) sin intervención de la CPU.
+\begin{enumerate}
+    \item \textbf{La crisis de reproducibilidad y artefactos binarios huérfanos:} El flujo de trabajo tradicional en entornos de diseño electrónico (EDA) como AMD Vivado genera proyectos monolíticos y archivos binarios propietarios (\textit{bitstreams}) desprovistos de un vínculo determinista con el código fuente HDL (\textit{Hardware Description Language}) que los originó. En la práctica experimental, es frecuente encontrar mapas de bits en operación cuyo código fuente exacto, restricciones de temporización o versiones de herramientas de síntesis se han perdido o son irreproducibles.
+    
+    \item \textbf{Acoplamiento rígido entre firmware y aplicaciones de usuario:} Los sistemas de adquisición de datos (DAQ) convencionales suelen programarse mediante interfaces ad-hoc donde el software de usuario accede directamente a direcciones de memoria física no protegidas o registros de control con desplazamientos (\textit{offsets}) fijos. Cualquier modificación menor en la lógica programable (como la inserción de una etapa de filtrado o la alteración del mapa de registros) fractura de inmediato la compatibilidad de la aplicación de usuario, demandando una reescritura manual extensa del software.
+    
+    \item \textbf{Barrera de entrada y fricción en la distribución:} El despliegue de plataformas de instrumentación basadas en SoC-FPGA suele exigir que el investigador en física domine herramientas de bajo nivel de compilación cruzada en C/C++, controladores de kernel de Linux y programación JTAG. Esta complejidad técnica desvía el esfuerzo investigativo del fenómeno físico hacia la resolución de problemas de infraestructura embebida.
+\end{enumerate}
+
+\subsection{Objetivos y alcance del marco de co-diseño propuesto}
+\label{subsec:objetivos_framework}
+
+Para superar estas limitaciones, este trabajo propone un marco de trabajo (\textit{framework}) de co-diseño hardware/software modular, reproducible y agnóstico al tipo de dato, orientado a tarjetas SoC-FPGA heterogéneas. El diseño persigue los siguientes objetivos específicos:
+
+\begin{itemize}
+    \item \textbf{Desacoplamiento arquitectónico mediante repositorios duales:} Separar estrictamente el desarrollo del firmware en la Lógica Programable (PL) del software de abstracción e interfaz en el Sistema de Procesamiento (PS), gestionando el ciclo de vida del hardware mediante la metodología CERN Hog~\cite{cern_hog} y el software como un paquete distribuible en PyPI sobre el ecosistema PYNQ~\cite{pynq_framework}.
+    
+    \item \textbf{Trazabilidad determinista Git-a-Silicio:} Garantizar que cada mapa de bits generado por el flujo de integración continua (CI/CD) contenga embebido en sus propios registros de hardware el hash de Git (\textit{Git SHA}) y la etiqueta de versión semántica que certifican su procedencia.
+    
+    \item \textbf{Pipeline de transporte de alto rendimiento y no-bloqueante:} Implementar una arquitectura de flujo componible en AXI4-Stream que transfiera paquetes digitalizados directamente a la memoria RAM compartida (DDR) mediante motores de Acceso Directo a Memoria (AXI DMA) sin intervención de la CPU, asegurando que el bus de datos jamás represente un cuello de botella.
+    
+    \item \textbf{Reconfigurabilidad dinámica en tiempo de ejecución:} Proveer un plano de control mapeado en memoria (AXI4-Lite) que permita a la capa de software ajustar parámetros de adquisición, factores de diezmado y algoritmos de procesamiento digital de señales (DSP) en caliente sin reiniciar el procesador ni resintetizar la FPGA.
+\end{itemize}
+
+El alcance de este capítulo se centra en formalizar la arquitectura metodológica, validar sus límites analíticos de transporte y demostrar su solidez mediante una suite de certificación en lazo cerrado con hardware-in-the-loop (HIL). Esta infraestructura validada constituirá la base operativa sobre la cual se desarrollará el sistema de localización espacial de fuentes de ondas en los capítulos subsiguientes.
+
+% ==============================================================================
+% 1.2. FUNDAMENTACIÓN TEÓRICA DEL CO-DISEÑO HARDWARE/SOFTWARE
+% ==============================================================================
+\section{Fundamentación Teórica del Co-Diseño Hardware/Software}
+\label{sec:marco_teorico_framework}
+
+La integración armónica entre lógica reconfigurable y procesamiento secuencial requiere fundamentos claros de interconexión, control y abstracción de memoria. A continuación, se detallan la arquitectura heterogénea del dispositivo Zynq-7000 (Sección~\ref{subsec:teoria_soc_fpga}), los protocolos del estándar industrial AXI4 (Sección~\ref{subsec:teoria_axi4}), la metodología DevOps de gestión de firmware con CERN Hog (Sección~\ref{subsec:teoria_cern_hog}) y el modelo de gestión de memoria contigua en AMD PYNQ (Sección~\ref{subsec:teoria_pynq_cma}).
+
+\subsection{Arquitectura heterogénea SoC-FPGA}
+\label{subsec:teoria_soc_fpga}
+
+Los sistemas en chip basados en FPGA heterogéneos, ejemplificados por la familia AMD/Xilinx Zynq-7000~\cite{xilinx_ug585}, fusionan en un único sustrato de silicio dos dominios de cómputo complementarios (Figura~\ref{fig:tres_planos}):
+
+\begin{enumerate}
+    \item \textbf{Sistema de Procesamiento (Processing System - PS):} Compuesto por una unidad de microprocesador dedicada (Hard Dual-Core ARM Cortex-A9 MPCore) que opera hasta $650~\text{MHz}$, con memorias caché L1/L2, controladores de periféricos estándar (Ethernet, USB, UART, SDIO) y un controlador de memoria dinámica DDR3 integrada. El PS ejecuta un sistema operativo embebido (GNU/Linux), proporcionando capacidades avanzadas de red, sistemas de archivos e interfaces de usuario de alto nivel.
+    
+    \item \textbf{Lógica Programable (Programmable Logic - PL):} Una matriz reconfigurable equivalente a una FPGA Artix-7 (dispositivo \texttt{xc7z020clg400-1} en la tarjeta PYNQ-Z2), compuesta por bloques lógicos configurables (CLB: 53\,200 tablas de búsqueda LUT de 6 entradas y 106\,400 biestables Flip-Flops), 220 rebanadas de procesamiento digital de señales (DSP48E1) y 4.9~Mb de memoria en bloque integrada (Block RAM).
+\end{enumerate}
+
+La ventaja fundamental de esta arquitectura radica en el acoplamiento estrecho entre ambos dominios mediante canales dedicados de interconexión interna de silicio, eliminando los cuellos de botella de ancho de banda y latencia inherentes a los buses externos tradicionales (como PCIe, SPI o USB).
+
+\subsection{Protocolos de interconexión AXI4 (Stream, Lite y Memory-Mapped)}
+\label{subsec:teoria_axi4}
+
+La comunicación y transferencia de datos entre los dominios PS y PL se rige bajo el estándar industrial AMBA (\textit{Advanced Microcontroller Bus Architecture}) AXI4 (\textit{Advanced eXtensible Interface}) de ARM~\cite{arm_axi4_spec, arm_axis_spec}. Este trabajo implementa tres variantes complementarias del protocolo:
+
+\begin{itemize}
+    \item \textbf{AXI4-Stream (AXIS):} Protocolo punto a punto orientado a flujos de datos continuos de alta velocidad~\cite{arm_axis_spec}. Prescinde de direcciones de memoria para maximizar el ancho de banda, sincronizando transferencias unidireccionales mediante un mecanismo de protocolo de enlace (\textit{handshake}) de dos hilos: \texttt{TVALID} (asertada por el emisor para indicar datos válidos en \texttt{TDATA}) y \texttt{TREADY} (asertada por el receptor cuando puede consumir datos). La delimitación de tramas o paquetes se realiza mediante la señal combinacional \texttt{TLAST}.
+    
+    \item \textbf{AXI4-Lite:} Subconjunto simplificado y síncrono del protocolo AXI4 mapeado en memoria~\cite{arm_axi4_spec}. Opera con transacciones de una sola transferencia por ráfaga (palabras de 32 bits) a través de cinco canales independientes (dirección de lectura, datos de lectura, dirección de escritura, datos de escritura y respuesta de escritura). Es el canal óptimo para el mapeo de registros de control y estado (CSR) de baja latencia entre el procesador ARM y los núcleos en la PL.
+    
+    \item \textbf{AXI4 Full / High-Performance (AXI-HP):} Interfaz maestra de alto rendimiento mapeada en memoria que interconecta la lógica programable directamente con el conmutador de memoria DDR3 del PS. Admite transferencias en ráfaga de hasta 256 ciclos de reloj con buses de datos de 32 o 64 bits a $100~\text{MHz}$, proporcionando un ancho de banda teórico de hasta $800~\text{MB/s}$ por puerto.
+\end{itemize}
+
+\subsection{Paradigma DevOps para Hardware: Filosofía y Metodología CERN Hog}
+\label{subsec:teoria_cern_hog}
+
+El desarrollo de firmware en FPGA ha adolecido históricamente de la falta de herramientas nativas de control de versiones. La metodología CERN Hog (\textit{HDL on Git})~\cite{cern_hog}, diseñada originalmente para los experimentos de física de altas energías del Gran Colisionador de Hadrones (LHC), resuelve este problema mediante un paradigma declarativo:
+
+\begin{enumerate}
+    \item \textbf{Desacoplamiento de binarios y código fuente:} En lugar de almacenar proyectos binarios pesados (\texttt{.xpr} de Vivado), Hog gestiona exclusivamente archivos de texto plano: código VHDL/Verilog, diagramas de bloques en formato de script (\texttt{.bd}) y listas de fuentes (\texttt{.src}, \texttt{.con}, \texttt{.sub}).
+    \item \textbf{Recreación determinista:} Mediante scripts en TCL, Hog reconstruye el proyecto de Vivado idéntico en cualquier máquina o servidor de integración continua (CI/CD) a partir del árbol de Git.
+    \item \textbf{Trazabilidad Git-a-Silicio:} Durante la etapa previa a la síntesis (\textit{pre-synthesis hook}), Hog consulta el repositorio de Git e inyecta dinámicamente el hash SHA de 32 bits del commit actual (\texttt{GLOBAL\_SHA}) y el código de versión semántica (\texttt{GLOBAL\_VER}) como parámetros genéricos VHDL en la entidad de nivel superior (\textit{top-level entity}). Esto garantiza que cada mapa de bits posea una firma digital inmutable verificable en tiempo de ejecución por el procesador.
+\end{enumerate}
+
+\subsection{Paradigma de Abstracción en Software: Ecosistema AMD PYNQ y CMA}
+\label{subsec:teoria_pynq_cma}
+
+El ecosistema AMD PYNQ (\textit{Python Productivity for Zynq})~\cite{pynq_framework} introduce una capa de abstracción sobre el sistema operativo Linux embebido del PS, permitiendo a los desarrolladores controlar circuitos reconfigurables mediante librerías de alto nivel en Python. 
+
+La arquitectura PYNQ encapsula el diseño de hardware bajo el concepto de \textit{Overlay}, compuesto por el mapa de bits (\texttt{.bit}) y el archivo de metadatos de entrega de hardware (\texttt{.hwh} - \textit{Hardware Handoff}). A través del analizador de metadatos, PYNQ descubre dinámicamente los bloques IP presentes en la PL, sus rangos de memoria mapeada y sus interrupciones.
+
+Para lograr transferencias de datos masivas sin sobrecargar a la CPU con operaciones de copia entre espacio de usuario y espacio de kernel (\textit{zero-copy transfer}), PYNQ aprovecha el mecanismo CMA (\textit{Contiguous Memory Allocator}) del kernel de Linux. Mediante la función \texttt{pynq.allocate()}, se reservan bloques de memoria física contigua en la RAM DDR, los cuales son entregados directamente al motor AXI DMA en la PL. De este modo, las muestras digitalizadas se escriben por hardware en la memoria compartida, quedando disponibles de inmediato como arreglos de NumPy para su manipulación analítica o visualización interactiva.
+
+% ==============================================================================
+% 1.3. METODOLOGÍA: ARQUITECTURA DE TRES PLANOS Y CICLO DE VIDA CI/CD
+% ==============================================================================
+\section{Metodología: Arquitectura de Tres Planos y Ciclo de Vida CI/CD}
+\label{sec:metodologia_framework}
+
+La metodología propuesta articula el desarrollo de firmware y software en una estructura estrictamente desacoplada. Se expone la estrategia de repositorios duales (Sección~\ref{subsec:metodologia_dual_repo}) y se formaliza el modelo de tres planos en la Sección~\ref{subsec:modelo_tres_planos}, descomponiendo el sistema en Plano de Datos (\ref{subsubsec:plano_datos}), Plano de Control (\ref{subsubsec:plano_control}) y Plano de Gestión (\ref{subsubsec:plano_gestion}). Finalmente, se detallan los ganchos de automatización en Vivado y extracción de contexto (Sección~\ref{subsec:vivado_hooks_context}), el flujo de integración continua (Sección~\ref{subsec:flujo_cicd_empaquetado}) y el protocolo de depuración en lazo cerrado con instrumental externo~\cite{digilent_waveforms_sdk} (Sección~\ref{subsec:protocolo_hil}).
+
+\subsection{Estrategia de Repositorios Desacoplados (Dual-Repo Model)}
+\label{subsec:metodologia_dual_repo}
+
+Para resolver el problema del acoplamiento rígido tradicional entre el diseño lógico y las aplicaciones de usuario, el marco de trabajo establece una estricta separación de responsabilidades mediante dos repositorios independientes:
+
+\begin{enumerate}
+    \item \textbf{Repositorio de Firmware (\texttt{hw-xadc-dma-overlays}):} Gestiona exclusivamente el diseño digital en la Lógica Programable (PL). Contiene los archivos fuente en VHDL, las restricciones físicas (\texttt{.xdc}), la configuración de CERN Hog y los diagramas de bloques (\texttt{.bd}). Su ciclo de vida concluye con la síntesis, implementación y publicación automatizada de los binarios ejecutables (\texttt{.bit} y \texttt{.hwh}).
+    
+    \item \textbf{Repositorio de Software (\texttt{sw-pynq-oscilloscope}):} Gestiona la capa de abstracción, controladores de hardware en Python, interfaces interactivas en Jupyter y la suite de caracterización. Se distribuye de forma estándar a través del índice de paquetes de Python (PyPI).
+\end{enumerate}
+
+Ambos repositorios se vinculan de manera no invasiva mediante un archivo descriptor de contrato (\texttt{hardware.json}), el cual declara explícitamente el repositorio de origen y la versión semántica del mapa de bits requerido, garantizando una interoperabilidad predecible y reproducible.
+
+\subsection{Modelo Arquitectónico de Tres Planos}
+\label{subsec:modelo_tres_planos}
+
+El sistema embebido se formaliza a través de tres planos funcionales ortogonales (Figura~\ref{fig:tres_planos}), desacoplando el transporte de alta velocidad del control y la gestión de versiones.
 
 \begin{figure}[htbp]
     \centering
-    \IfFileExists{figures/xadc_bd_diagram.png}{%
-        \includegraphics[width=\textwidth]{figures/xadc_bd_diagram.png}%
+    \IfFileExists{figures/three_planes_diagram.png}{%
+        \includegraphics[width=0.95\textwidth]{figures/three_planes_diagram.png}%
     }{%
-        \framebox[\textwidth][c]{%
-            \parbox[c][6cm]{0.9\textwidth}{%
-                \centering \textbf{[ Diagrama de Bloques en Vivado ]}\\[0.5em]
-                \small (Agregue la imagen \texttt{xadc\_bd\_diagram.png} en la carpeta \texttt{figures/})%
+        \framebox[0.95\textwidth][c]{%
+            \parbox[c][5cm]{0.9\textwidth}{%
+                \centering \textbf{[ Diagrama Conceptual: Arquitectura de Tres Planos ]}\\[0.5em]
+                \small (Plano de Datos AXI-Stream $\leftrightarrow$ Plano de Control MMIO $\leftrightarrow$ Plano de Gestión CI/CD)\\[0.5em]
+                \footnotesize Agregue la imagen \texttt{three\_planes\_diagram.png} en la carpeta \texttt{figures/}%
             }%
         }%
     }
-    \caption{Diagrama de bloques general en Vivado IP Integrator para la plataforma de adquisición \texttt{hw-xadc-dma-overlays}.}
+    \caption{Modelo arquitectónico de tres planos desacoplados para instrumentación científica sobre SoC-FPGA.}
+    \label{fig:tres_planos}
+\end{figure}
+
+\subsubsection{Plano de Datos (Data Plane): Grafo de Flujo Componible AXI4-Stream}
+\label{subsubsec:plano_datos}
+
+El Plano de Datos constituye la ruta de transporte y procesamiento de señales en tiempo real dentro de la PL. Se formaliza como un Grafo Dirigido Acíclico (DAG) de flujo continuo sincronizado por el reloj de sistema ($f_{\text{aclk}} = 100~\text{MHz}$) y articulado mediante cuatro categorías de nodos AXI4-Stream:
+
+\begin{itemize}
+    \item \textbf{Nodo Fuente (\textit{Source Node}):} Digitalizador primario (ej. el bloque \texttt{xadc\_wiz\_0}) que opera en modo secuenciador continuo sobre canales analógicos diferenciales ($V_{\text{aux1}}$ en pin A0 y $V_{\text{aux9}}$ en pin A1), generando un flujo de muestras intercaladas a $1~\text{MSPS}$ en formato AXI4-Stream de 16 bits (\texttt{M\_AXIS}).
+    
+    \item \textbf{Nodos de Transformación (\textit{DSP Transform Nodes}):} Módulos síncronos en VHDL que procesan o modifican el flujo sin romper el protocolo de enlace (\textit{handshake}):
+    \begin{itemize}
+        \item \textit{Unidad de Disparo (\texttt{axis\_trigger\_unit}):} Realiza el filtrado temporal por hardware evaluando condiciones de umbral analógico, flanco (subida/bajada) y selección de canal fuente, implementando un mecanismo de bloqueo de fase (\textit{phase-lock}) que garantiza que cada cuadro transmitido comience estrictamente alineado con el canal A0.
+        \item \textit{Diezmador de Tasa (\texttt{axis\_decimator}):} Submuestrea el flujo por un factor programable $M \in \{1, 2, 4, 8, \dots\}$, escalando el ancho de banda efectivo.
+        \item \textit{Aceleradores de Dominio Frecuencial (\texttt{xfft\_0} y \texttt{cordic\_0}):} Bifurcados mediante \texttt{axis\_broadcaster}, calculan en tiempo de ejecución la Transformada Rápida de Fourier de 2048 puntos y extraen la magnitud polar sin intervención de la CPU.
+    \end{itemize}
+    
+    \item \textbf{Nodo Delimitador (\textit{Framer Node}):} Módulo \texttt{tlast\_generator} que delimita paquetes contiguos asertando combinacionalmente la señal \texttt{m\_axis\_tlast} exactamente al completarse un número de muestras programable $N$.
+    
+    \item \textbf{Nodo Sumidero (\textit{Sink Node}):} Motores DMA (\texttt{axi\_dma\_0} y \texttt{axi\_dma\_1}) que canalizan las ráfagas hacia el bus de alto rendimiento AXI-HP0 de 64 bits hacia la memoria DDR.
+\end{itemize}
+
+\subsubsection{Plano de Control (Control Plane): Espacio MMIO y Reconfiguración Dinámica}
+\label{subsubsec:plano_control}
+
+El Plano de Control permite al Sistema de Procesamiento (PS) gobernar el comportamiento de los nodos de la PL en tiempo de ejecución mediante transacciones mapeadas en memoria (MMIO) sobre el bus AXI4-Lite (\texttt{M\_AXI\_GP0} a $100~\text{MHz}$). 
+
+A través del conmutador AXI SmartConnect (\texttt{axi\_smc}), se distribuye un mapa de memoria estructurado que asigna registros de 32 bits a cada periférico (direcciones base: DMA Tiempo \texttt{0x40400000}, DMA FFT \texttt{0x40410000}, Temporizador \texttt{0x42800000}, XADC \texttt{0x43C00000} y Unidad de Disparo \texttt{0x43C10000}).
+
+El núcleo \texttt{axis\_trigger\_unit} actúa como un concentrador de control dinámico: al escribir un comando desde Python, propaga en tiempo real señales de control hacia otros bloques (ej. \texttt{packet\_size\_out[15:0]} hacia \texttt{tlast\_generator}, \texttt{decim\_factor\_out[1:0]} hacia \texttt{axis\_decimator} y \texttt{m\_axis\_fft\_config} hacia \texttt{xfft\_0}), permitiendo alterar el comportamiento del sistema sin reiniciar la FPGA.
+
+\subsubsection{Plano de Gestión (Lifecycle Plane): Trazabilidad Git SHA y Despliegue}
+\label{subsubsec:plano_gestion}
+
+El Plano de Gestión asegura la trazabilidad estricta y el despliegue automático del ecosistema. En la etapa de síntesis, CERN Hog inyecta los genéricos \texttt{GLOBAL\_SHA} y \texttt{GLOBAL\_VER} en el \textit{wrapper} VHDL de nivel superior (\texttt{xadc\_wrapper.vhd}), embebiendo de forma inmutable el hash del commit de Git en los registros del hardware.
+
+En la capa de software, la clase \texttt{HardwareLoader} inspecciona el archivo \texttt{hardware.json}, detecta automáticamente el modelo de la tarjeta conectada a través de la variable \texttt{\$BOARD}, consulta la API de lanzamientos de GitHub (\textit{GitHub Releases}), descarga los artefactos binarios (\texttt{.bit} y \texttt{.hwh}) en un directorio de caché local (\texttt{\textasciitilde/.cache/pynq\_oscilloscope/}) y programa la firma en la FPGA de manera transparente.
+
+\subsection{Automatización de Hooks en Vivado y Extracción de Contexto (\textit{Context Harvesting})}
+\label{subsec:vivado_hooks_context}
+
+Para agilizar el flujo de trabajo de ingeniería y asegurar la documentación continua del diseño, se implementaron scripts TCL de enganche (\textit{hooks}) y herramientas de extracción de contexto:
+
+\begin{itemize}
+    \item \textbf{Exportación Determinista de Diagramas (\texttt{post-creation.tcl}):} Registra comandos personalizados en la barra de herramientas de la interfaz gráfica de Vivado que exportan automáticamente el diseño de bloques (\texttt{.bd}) en formato vectorial SVG (para documentación en \texttt{docs/images/}) y en formato PDF (para contexto en \texttt{context/}).
+    
+    \item \textbf{Recolección de Binarios (\texttt{post-bitstream.tcl}):} Extrae automáticamente los artefactos compilados (\texttt{pynq\_z2.bit} y \texttt{pynq\_z2.hwh}) desde los directorios internos de Vivado hacia la carpeta de entrega \texttt{bin/}.
+    
+    \item \textbf{Ingeniería de Contexto (\textit{Context Harvesting}):} Scripts en Bash (\texttt{generate\_hw\_summary.sh} y \texttt{generate\_sw\_summary.sh}) que consolidan el historial de Git, el árbol de directorios, los esquemas de interconexión y el código fuente plano en archivos de texto estructurado (\texttt{hw\_summary.txt} y \texttt{sw\_summary.txt}), facilitando la auditoría del proyecto y el desarrollo asistido por modelos de lenguaje (LLM).
+\end{itemize}
+
+\subsection{Flujo de Integración Continua (CI/CD) y Empaquetado Autónomo}
+\label{subsec:flujo_cicd_empaquetado}
+
+El despliegue de nuevos lanzamientos opera bajo flujos de trabajo automatizados en GitHub Actions:
+
+\begin{enumerate}
+    \item \textbf{Pipeline de Firmware (\texttt{release.yml}):} Se activa al detectar etiquetas de versión (\texttt{v*}). Empaqueta los archivos binarios de la carpeta \texttt{bin/} y genera automáticamente una publicación en GitHub Releases, distinguiendo dinámicamente versiones candidatas (\textit{pre-releases} como \texttt{v1.3.0-rc1}) de lanzamientos estables.
+    
+    \item \textbf{Pipeline de Software (\texttt{pypi.yml}):} Ejecuta la construcción de paquetes de distribución (\textit{wheels} y código fuente) y realiza la publicación automática en PyPI mediante el protocolo seguro \textit{Trusted Publishing} de GitHub, eliminando la necesidad de gestionar credenciales o contraseñas manuales.
+\end{enumerate}
+
+\subsection{Protocolo de Depuración e Iteración Rápida Hardware-in-the-Loop (HIL)}
+\label{subsec:protocolo_hil}
+
+Para validar nuevas características funcionales de forma iterativa y sin riesgo de regresiones, se definió un protocolo de desarrollo en cinco etapas (Figura~\ref{fig:tres_planos}):
+
+\begin{enumerate}
+    \item \textbf{Iteración en Hardware:} Creación de rama de característica (\texttt{feat/*}) en el repositorio de hardware $\rightarrow$ Modificación del diseño en Vivado $\rightarrow$ Generación de bitstream $\rightarrow$ Publicación de pre-release etiquetado (\texttt{vX.Y.Z-rcN}).
+    
+    \item \textbf{Iteración en Software:} Actualización del puntero en \texttt{hardware.json} apuntando al release candidato $\rightarrow$ Implementación del controlador en Python $\rightarrow$ Creación de cuadernos de prueba (\texttt{notebooks/}).
+    
+    \item \textbf{Verificación HIL en la Tarjeta:} Despliegue en la tarjeta PYNQ-Z2 mediante \texttt{HardwareLoader}. Se conecta el instrumento Digilent Analog Discovery 3 (AD3) controlado por la librería \texttt{pydwf}~\cite{digilent_waveforms_sdk} para inyectar estímulos analógicos conocidos (senoidales, cuadrados y triangulares) de forma concurrente sobre los canales A0 y A1.
+    
+    \item \textbf{Depuración y Ajuste:} Si se detectan anomalías en hardware, se ajusta el diseño en Vivado, se re-etiqueta el release candidato en Git y se limpia la caché local de la tarjeta; si el error es en software, se depura interactivamente en Jupyter y se consolidan las correcciones en el paquete.
+    
+    \item \textbf{Promoción y Cierre:} Ejecución de la suite completa de pruebas de regresión $\rightarrow$ Fusión (\textit{merge}) hacia la rama principal (\texttt{main}) $\rightarrow$ Publicación oficial de la versión definitiva en GitHub y PyPI.
+\end{enumerate}
+
+% ==============================================================================
+% 1.4. RESULTADOS: VALIDACIÓN EXPERIMENTAL DEL FRAMEWORK
+% ==============================================================================
+\section{Resultados: Validación Experimental del Framework}
+\label{sec:resultados_framework}
+
+La evaluación experimental del framework valida sus garantías teóricas de no-bloqueo y su viabilidad práctica como plataforma de desarrollo ágil. En la Sección~\ref{subsec:analisis_transporte} se analizan analíticamente las cotas de transporte de datos hacia la memoria RAM compartida, mientras que en la Sección~\ref{subsec:suite_certificacion_hil} se describe la suite automatizada de certificación HIL. Como caso de estudio integral, en la Sección~\ref{subsec:demostrador_instrumento} se presenta la plataforma de instrumentación multi-dominio (\ref{subsubsec:dsp_pl}, \ref{subsubsec:ui_reactiva} y \ref{subsubsec:metricas_linea_base}). Por último, en la Sección~\ref{subsec:modelo_forking} se evalúa cuantitativamente la reutilización de código y la extensibilidad del framework hacia nuevos desarrollos.
+
+\subsection{Análisis Analítico de Rendimiento y Cotas de Transporte (PL -- PS)}
+\label{subsec:analisis_transporte}
+
+La viabilidad de un sistema de adquisición de datos en tiempo real radica en garantizar que la velocidad de generación de muestras en la lógica programable jamás supere la capacidad de evacuación del bus de memoria hacia la memoria principal (DDR). La tasa de transferencia generada por el grafo de adquisición ($\text{Throughput}_{\text{DAQ}}$) frente al límite teórico de transferencia del puerto maestro AXI-HP0 ($\text{Throughput}_{\text{AXI-HP0}}$) se modela como:
+
+\begin{equation}
+    \text{Throughput}_{\text{DAQ}} = N_{\text{ch}} \cdot f_s \cdot B_{\text{sample}} \quad \ll \quad \text{Throughput}_{\text{AXI-HP0}} = W_{\text{bus}} \cdot f_{\text{aclk}} = 800~\text{MB/s}
+    \label{eq:throughput_bounds}
+\end{equation}
+donde $N_{\text{ch}}$ representa el número de canales analógicos activos, $f_s$ es la frecuencia de muestreo por canal, $B_{\text{sample}}$ es el ancho de palabra digitalizado en bytes ($2~\text{B}$ para 16 bits), $W_{\text{bus}} = 8~\text{B}$ ($64~\text{bits}$) y $f_{\text{aclk}} = 100~\text{MHz}$.
+
+Para una configuración de muestreo dual simultáneo a $f_s = 500~\text{kSPS}$ por canal ($1.0~\text{MSPS}$ agregado), la tasa de datos generada es:
+\begin{equation}
+    \text{Throughput}_{\text{DAQ}} = 2 \times (500 \times 10^3~\text{muestras/s}) \times 2~\text{B/muestra} = 2.00~\text{MB/s}
+\end{equation}
+
+Al comparar este valor con la capacidad del puerto AXI-HP0 ($800~\text{MB/s}$), se obtiene una utilización del bus de apenas el $0.25\%$. Dado que la transferencia se ejecuta mediante el motor AXI DMA en modo directo sobre memoria contigua (CMA) sin intervención de la CPU, **el framework garantiza analíticamente cero pérdidas de paquetes por saturación de bus**, preservando el determinismo temporal con una resolución medible de $10~\text{ns}$ ($100~\text{MHz}$) a través del bloque \texttt{axi\_timer\_0}.
+
+\subsection{Suite Automatizada de Certificación Hardware-in-the-Loop (HIL)}
+\label{subsec:suite_certificacion_hil}
+
+Para evaluar de forma reproducible cualquier versión de firmware o derivación del framework sin requerir costoso instrumental de banco dedicado, se implementó una suite de pruebas automatizadas en lazo cerrado (\textit{Hardware-in-the-Loop} - HIL) mediante el instrumento multifunción Digilent Analog Discovery 3 (AD3) controlado por la librería \texttt{pydwf}~\cite{digilent_waveforms_sdk}.
+
+La suite (\texttt{04\_automated\_performance\_benchmark.ipynb}) ejecuta la generación analógica en un hilo desacoplado (\textit{daemon thread}) a través de la clase \texttt{AD3SignalGenerator} e inspecciona cuatro criterios de certificación estándar:
+\begin{enumerate}
+    \item \textbf{Fidelidad Dinámica de Señal:} Inyección de barridos de frecuencia senoidales (desde $100~\text{Hz}$ hasta $250~\text{kHz}$) para medir la respuesta en frecuencia a $-3~\text{dB}$, la relación señal a ruido (SNR), la distorsión armónica total (THD) y el número efectivo de bits (ENOB).
+    \item \textbf{Determinismo Temporal y Jitter:} Medición del intervalo de tiempo transcurrido entre la aserción de la señal \texttt{TLAST} por hardware y la notificación de finalización de ráfaga DMA en el software.
+    \item \textbf{Ocupación de Recursos en Silicio:} Registro del consumo porcentual de tablas LUT, registros Flip-Flops, bloques DSP48E1 y memorias BRAM en la FPGA Artix-7.
+    \item \textbf{Rendimiento de Renderizado en Software:} Evaluación de la tasa de cuadros por segundo (FPS) en la interfaz gráfica frente a variaciones en el tamaño de paquete ($N$).
+\end{enumerate}
+
+\subsection{Instancia Demostradora 1: Instrumentación Reactiva Multi-Dominio}
+\label{subsec:demostrador_instrumento}
+
+Para validar el modelo de tres planos y la suite HIL en un escenario de aplicación real, se desarrolló el ecosistema de instrumentación \texttt{pynq-oscilloscope} (\texttt{v1.3.0}), compuesto por el firmware \texttt{hw-xadc-dma-overlays} y la librería de usuario correspondiente.
+
+\subsubsection{Cadena de Coprocesamiento DSP en Lógica Programable}
+\label{subsubsec:dsp_pl}
+
+La arquitectura en la PL (Figura~\ref{fig:xadc_bd_diagram}) implementa un grafo AXI4-Stream compuesto:
+
+\begin{figure}[htbp]
+    \centering
+    \IfFileExists{figures/xadc_bd.png}{%
+        \includegraphics[width=\textwidth]{figures/xadc_bd.png}%
+    }{%
+        \framebox[\textwidth][c]{%
+            \parbox[c][5.5cm]{0.9\textwidth}{%
+                \centering \textbf{[ Diagrama de Bloques en Vivado IP Integrator ]}\\[0.5em]
+                \small (Grafo AXI4-Stream: XADC $\rightarrow$ Trigger $\rightarrow$ Decimador $\rightarrow$ FFT $\rightarrow$ CORDIC $\rightarrow$ Dual DMA)\\[0.5em]
+                \footnotesize Agregue la imagen \texttt{xadc\_bd.png} en la carpeta \texttt{figures/}%
+            }%
+        }%
+    }
+    \caption{Diagrama de bloques general del grafo de procesamiento AXI4-Stream y distribución de control AXI4-Lite en Vivado IP Integrator.}
     \label{fig:xadc_bd_diagram}
 \end{figure}
 
-\subsubsection{Arquitectura de Adquisición y Flujo AXI4-Stream}
-La arquitectura de adquisición se diseñó utilizando Vivado 2024.2.2 bajo la metodología de IP Integrator (Figura~\ref{fig:xadc_bd_diagram}). El flujo de señal se articula mediante los siguientes bloques principales:
-
 \begin{enumerate}
-    \item \textbf{Digitalizador XADC (\texttt{xadc\_wiz\_0}):} Configurado en modo canal único sobre la entrada auxiliar diferencial \texttt{VAUXP1/VAUXN1}, operando a una frecuencia de muestreo de $1~\text{MSPS}$ (1000~kSPS). La interfaz de salida fue establecida en formato AXI4-Stream de 16 bits (\texttt{M\_AXIS}).
-    \item \textbf{Generador de TLAST (\texttt{tlast\_generator}):} Módulo VHDL personalizado que actúa como empaquetador de flujo, asertando la señal \texttt{TLAST} combinacionalmente cada $N = 16\,384$ muestras (\texttt{PACKET\_SIZE}) para delimitar las ráfagas de memoria requeridas por el motor DMA.
-    \item \textbf{Acceso Directo a Memoria (\texttt{axi\_dma\_0}):} Motor DMA operando en modo \textit{Simple DMA} directo (S2MM) con un tamaño de ráfaga de 128 transferencias. Los datos son transmitidos a través del interconector de datos (\texttt{axi\_mem\_intercon}), adaptando el flujo de 32 bits del DMA hacia el bus de alto rendimiento AXI-HP0 de 64 bits del Zynq PS. Esta transferencia directa a memoria DDR (\texttt{0x00000000} -- \texttt{0x1FFFFFFF}) alcanza un \textit{throughput} sostenido de hardware de $1.75~\text{MB/s}$, liberando por completo a la CPU de tareas de procesamiento de muestra por muestra.
-    \item \textbf{Temporizador AXI y Medición de Latencia (\texttt{axi\_timer\_0}):} Bloque de apoyo cuya entrada de captura (\texttt{capturetrig0}) se conecta a la señal \texttt{TLAST}, permitiendo registrar con precisión de $10~\text{ns}$ ($100~\text{MHz}$) la finalización de paquetes desde la PL.
-    \item \textbf{Infraestructura de Interconexión y Reloj:} El bloque \texttt{processing\_system7\_0} genera un reloj de sistema de $100~\text{MHz}$ (\texttt{FCLK\_CLK0}) y un reseteo sincronizado mediante \texttt{rst\_ps7\_0\_100M}. La distribución de comandos de control desde el PS se gestiona mediante el conmutador AXI SmartConnect (\texttt{axi\_smc}) sobre el bus \texttt{M\_AXI\_GP0}, mapeando las direcciones de registro del DMA (\texttt{0x40400000}), del temporizador (\texttt{0x42800000}) y del XADC (\texttt{0x43C00000}).
+    \item \textbf{Adquisición Dual Intercalada:} El bloque \texttt{xadc\_wiz\_0} muestrea simultáneamente los canales analógicos A0 ($V_{\text{aux1}}$) y A1 ($V_{\text{aux9}}$) a $500~\text{kSPS}$ por canal.
+    \item \textbf{Unidad de Disparo y Bloqueo de Fase (\texttt{axis\_trigger\_unit}):} Evalúa comparadores de umbral de 12 bits sobre el canal seleccionado por software (A0 o A1). Un autómata de estados finitos asegura un bloqueo de fase (\textit{phase-lock}) estricto, garantizando que cada paquete DMA comience siempre con la muestra correspondiente al canal A0, eliminando desfasajes espurios en el software.
+    \item \textbf{Diezmado Dinámico (\texttt{axis\_decimator}):} Permite a la CPU seleccionar factores de submuestreo $M \in \{1, 2, 4, 8\}$ para modificar la base de tiempo de adquisición.
+    \item \textbf{Coprocesamiento Espectral Paralelo:} El bloque \texttt{axis\_broadcaster} bifurca el flujo en dos rutas concurrentes: la rama temporal (hacia \texttt{axi\_dma\_0}) y la rama frecuencial, compuesta por un núcleo \texttt{xfft\_0} de 2048 puntos en punto flotante por bloques (\textit{Block Floating Point}) y un núcleo \texttt{cordic\_0} que calcula el módulo espectral $|X[k]|$ en tiempo real hacia \texttt{axi\_dma\_1}.
 \end{enumerate}
 
-\subsubsection{Gestión de Firmware con CERN Hog y Despliegue CI/CD}
-La construcción y control de versiones del proyecto se gestionaron mediante CERN Hog (\texttt{Top/pynq\_z2/}), utilizando archivos de listas (\texttt{.src}) para desacoplar el código VHDL y el diagrama de bloques (\texttt{xadc.bd}) de los archivos binarios propietarios de Vivado.
+\subsubsection{Interfaz de Usuario Reactiva y Despliegue en Tiempo Real}
+\label{subsubsec:ui_reactiva}
 
-El \textit{wrapper} de nivel superior (\texttt{xadc\_wrapper.vhd}) incorpora genéricos de versión (\texttt{GLOBAL\_VER}, \texttt{GLOBAL\_SHA}), embebiendo dinámicamente el \textit{hash} de Git en los registros de hardware durante la síntesis. Un script TCL de gancho (\texttt{post-bitstream.tcl}) extrae automáticamente los archivos binarios compilados (\texttt{pynq\_z2.bit} y \texttt{pynq\_z2.hwh}) a la carpeta \texttt{bin/}. Finalmente, un flujo de integración continua en GitHub Actions (\texttt{release.yml}) empaqueta y publica automáticamente estos artefactos binarios en los lanzamientos del repositorio al detectar etiquetas de versión (\texttt{v*}).
-
-\subsection{Interfaz e Instrumentación: \texttt{sw-pynq-oscilloscope}}
-\label{subsec:sw_oscilloscope}
-
-Para abstraer la complejidad del hardware en la Lógica Programable (PL) y ofrecer una interfaz interactiva de alto nivel, se desarrolló la librería en Python \texttt{pynq-oscilloscope} (\texttt{sw-pynq-oscilloscope}), disponible en PyPI (\texttt{pip install pynq-oscilloscope}). Esta capa de software permite controlar el hardware de adquisición, automatizar estímulos analógicos mediante hardware en el lazo (HIL) y visualizar señales en tiempo real en entornos Jupyter Notebook.
-
-\subsubsection{Carga Autónoma de Hardware y Controladores DMA}
-\begin{itemize}
-    \item \textbf{Carga Autónoma (\texttt{HardwareLoader}):} Inspecciona \texttt{hardware.json} (\texttt{v1.0.2}), detecta el modelo de la tarjeta objetivo (\texttt{\$BOARD}), consulta la API de GitHub Releases, descarga los archivos binarios \texttt{pynq\_z2.bit} y \texttt{pynq\_z2.hwh} a un directorio de caché local (\texttt{\textasciitilde/.cache/pynq\_oscilloscope/v1.0.2/}) y carga la firma en la FPGA.
-    \item \textbf{Controlador DMA (\texttt{StreamingXADC}):} Realiza una preasignación de memoria contigua (CMA) fuera del bucle de captura mediante \texttt{pynq.allocate(shape=(16384,), dtype='u2')}. Al invocar \texttt{capture()}, desencadena la transferencia DMA S2MM, espera la aserción de \texttt{TLAST} en la muestra 16\,384, realiza el alineamiento de bits (\texttt{raw \textgreater\textgreater\ 4}) y escala la señal al rango físico ($0.0~\text{V}$ a $3.3~\text{V}$).
-\end{itemize}
-
-\subsubsection{Estímulo HIL y Cuadro de Mando Interactivo}
-Para validar la respuesta dinámica del framework sin instrumental externo costoso, se integró el instrumento Digilent Analog Discovery 3 (AD3) mediante la librería \texttt{pydwf}:
-\begin{itemize}
-    \item \textbf{Gestión de Entorno (\texttt{EnvironmentManager}):} Instala automáticamente los paquetes Debian de Digilent Adept y WaveForms SDK para arquitecturas ARM (32/64 bits) y gestiona los permisos de bus USB (\texttt{/dev/bus/usb/}).
-    \item \textbf{Estímulo HIL No Bloqueante (\texttt{AD3SignalGenerator}):} Ejecuta la generación de señales (seno, cuadro, triángulo) en un hilo secundario (\textit{daemon thread}), permitiendo modificar parámetros en tiempo real sin congelar el kernel de Jupyter.
-    \item \textbf{Panel Interactivo (\texttt{OscilloscopeDashboard}):} Construido con \texttt{ipywidgets} y Plotly \texttt{FigureWidget} (Figura~\ref{fig:oscilloscope_dashboard}). Implementa enlaces de cliente de cero latencia (\texttt{widgets.jslink()}), disparo por software por flanco de subida (\texttt{np.where}) y renderizado atómico (\texttt{fig.batch\_update()}).
-\end{itemize}
+La capa de software encapsula el hardware en un cuadro de mando interactivo multi-dominio de 4 pestañas (Figura~\ref{fig:dashboard_ui}): Osciloscopio Dual (A0 y A1), Espectro Dual (FFT A0 y FFT A1) y Vistas dedicadas por canal.
 
 \begin{figure}[htbp]
     \centering
-    \IfFileExists{figures/oscilloscope_dashboard.png}{%
-        \includegraphics[width=\textwidth]{figures/oscilloscope_dashboard.png}%
+    \IfFileExists{figures/dashboard_ui.png}{%
+        \includegraphics[width=\textwidth]{figures/dashboard_ui.png}%
     }{%
         \framebox[\textwidth][c]{%
-            \parbox[c][6cm]{0.9\textwidth}{%
-                \centering \textbf{[ Interfaz del Osciloscopio Digital en Jupyter ]}\\[0.5em]
-                \small (Agregue la captura \texttt{oscilloscope\_dashboard.png} en la carpeta \texttt{figures/})%
+            \parbox[c][5.5cm]{0.9\textwidth}{%
+                \centering \textbf{[ Cuadro de Mando Interactivo Reactivo en Jupyter ]}\\[0.5em]
+                \small (Interfaz multi-pestaña para osciloscopio y analizador de espectro en tiempo real)\\[0.5em]
+                \footnotesize Agregue la captura \texttt{dashboard\_ui.png} en la carpeta \texttt{figures/}%
             }%
         }%
     }
-    \caption{Cuadro de mando interactivo del osciloscopio digital en tiempo real desplegado dentro de un entorno Jupyter Notebook.}
-    \label{fig:oscilloscope_dashboard}
+    \caption{Cuadro de mando interactivo multi-dominio desplegado en Jupyter Notebook con enlaces de cero latencia y renderizado atómico.}
+    \label{fig:dashboard_ui}
 \end{figure}
 
-\subsubsection{Validación del Framework mediante Caracterización HIL}
-La suite de caracterización en lazo cerrado (\texttt{04\_automated\_performance\_benchmark.ipynb}) sirvió para verificar experimentalmente que el flujo de co-diseño propuesto preserva la fidelidad de la señal y alcanza un alto rendimiento de software:
+La interfaz implementa enlaces de cliente de cero latencia en el navegador mediante \texttt{ipywidgets.jslink()}, reubicación dinámica de la línea de disparo (la cual salta al canal A0 o A1 según la selección) y renderizado atómico por lotes con \texttt{fig.batch\_update()} de Plotly, alcanzando tasas de refresco fluidas de 30 a 53 FPS sin congelar el kernel de Jupyter.
+
+\subsubsection{Métricas de la Línea Base de Certificación}
+\label{subsubsec:metricas_linea_base}
+
+Los resultados cuantitativos obtenidos por la suite HIL sobre la línea base de referencia certifican la calidad del flujo de co-diseño:
 \begin{itemize}
-    \item \textbf{Respuesta y Calidad de Señal:} Se midió un ancho de banda analógico a $-3~\text{dB}$ de $150.0~\text{kHz}$, una relación señal-ruido de $\text{SNR} = 45.96~\text{dB}$ ($\text{ENOB} = 7.34~\text{bits}$ para entrada senoidal de $50~\text{kHz}$) y un error medio de offset DC menor a $9.69~\text{mV}$ (precisión estática $>99.7\%$).
-    \item \textbf{Rendimiento de Interfaz:} El panel interactivo alcanzó una tasa de refresco fluida de $53.3~\text{cuadros/s (FPS)}$ con un \textit{throughput} sostenido de $1.75~\text{MB/s}$, demostrando que la capa PYNQ procesa eficazmente el flujo masivo de datos proveniente de la PL.
+    \item \textbf{Respuesta en Frecuencia y Fidelidad:} Ancho de banda analógico a $-3~\text{dB}$ de $150.0~\text{kHz}$, relación señal a ruido $\text{SNR} = 45.96~\text{dB}$ ($\text{ENOB} = 7.34~\text{bits}$ ante tono senoidal de $50~\text{kHz}$) y error medio de offset DC menor a $9.69~\text{mV}$ (precisión estática $>99.7\%$).
+    \item \textbf{Rendimiento de Cómputo:} Tasa de transferencia sostenida por DMA de $1.75~\text{MB/s}$ a $2.00~\text{MB/s}$ y tasa de refresco gráfica en pantalla de $53.3~\text{FPS}$.
+    \item \textbf{Coprocesamiento Espectral:} Resolución espectral $\Delta f = \frac{1~\text{MSPS}}{2048} \approx 488.28~\text{Hz}$ por bin (1024 bins únicos entre $0~\text{Hz}$ y $500~\text{kHz}$) calculados por hardware en la PL en $\approx 20.5~\mu\text{s}$, liberando al procesador ARM para tareas de visualización y análisis.
 \end{itemize}
 
-\subsection{Proyección a Módulos de Localización Espacial}
-\label{subsec:proyeccion_localizador}
+\subsection{Modelo de Derivación (\textit{Forking}), Extensibilidad y Reutilización de Código}
+\label{subsec:modelo_forking}
 
-La implementación y caracterización experimental de los repositorios \texttt{hw-xadc-dma-overlays} (Sección~\ref{subsec:hw_overlay}) y \texttt{sw-pynq-oscilloscope} (Sección~\ref{subsec:sw_oscilloscope}) constituyen la prueba de concepto que valida la solidez del marco de trabajo (\textit{framework}) co-diseñado. Los resultados confirman que la combinación de los entornos CERN Hog y AMD PYNQ permite construir instrumentación científica abierta de alto rendimiento, logrando transferencias deterministas por DMA a $1.75~\text{MB/s}$ y tasas de refresco interactivas de $53.3~\text{cuadros/s}$ sin generar cuellos de botella en la CPU ni en la interfaz gráfica.
+\subsubsection{Evaluación Cuantitativa del Factor de Reutilización}
+\label{subsubsec:factor_reutilizacion}
 
-Un aspecto fundamental demostrado en este capítulo es el desacoplamiento arquitectónico entre la capa de hardware en la Lógica Programable (PL) y la capa de abstracción en software (PS):
+Para demostrar que el framework reduce drásticamente el tiempo de desarrollo en futuros proyectos, se evaluó cuantitativamente el nivel de herencia de código alcanzado al derivar una nueva aplicación a partir del repositorio base (Tabla~\ref{tab:reutilizacion_codigo}).
+
+\begin{table}[htbp]
+\centering
+\caption{Evaluación cuantitativa del factor de reutilización de código e infraestructura.}
+\label{tab:reutilizacion_codigo}
+\begin{tabular}{lccl}
+\hline
+\textbf{Componente del Sistema} & \textbf{Líneas Base} & \textbf{Reutilización} & \textbf{Mecanismo de Herencia} \\ \hline
+Infraestructura AXI DMA y SmartConnect & VHDL / BD & $100\%$ & Heredado intacto en PL \\
+Delimitador Dinámico (\texttt{tlast\_generator}) & VHDL & $100\%$ & Heredado intacto en PL \\
+Gestor de Firmware (CERN Hog) & Scripts TCL & $95\%$ & Clonado y adaptado \\
+Pipeline CI/CD (GitHub Actions) & YAML & $95\%$ & Clonado y adaptado \\
+Carga Dinámica (\texttt{HardwareLoader}) & Python & $100\%$ & Heredado intacto en PS \\
+Gestión de Memoria Contigua (CMA) & Python & $100\%$ & Heredado intacto en PS \\
+Nodos DSP Especializados & VHDL / IP & Variable & Específico del dominio \\ \hline
+\textbf{Aceleración en Tiempo de Puesta en Marcha} & --- & $\mathbf{> 10\times}$ & \textbf{De semanas a horas} \\ \hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Integración de Nuevas Instancias y Módulos DAQ}
+\label{subsubsec:integracion_nuevos_daq}
+
+El modelo de derivación permite que cualquier nuevo desarrollo (como el sistema DAQ multicanal para localización de fuentes de ondas) se construya sobre una base ya probada. Al realizar un \textit{fork} del repositorio de hardware, el desarrollador únicamente sustituye el nodo fuente (\texttt{xadc\_wiz\_0}) por el nuevo arreglo de sensores o conversor ADC externo, e inserta los núcleos IP de correlación cruzada o conformación de haces en el grafo AXI4-Stream. La capa de transporte DMA, la gestión de memoria en Python y los flujos de integración continua permanecen invariantes.
+
+% ==============================================================================
+% 1.5. PROYECCIÓN HACIA EL LOCALIZADOR ESPACIAL DE FUENTES DE ONDAS
+% ==============================================================================
+\section{Proyección hacia el Localizador Espacial de Fuentes de Ondas}
+\label{sec:proyeccion_localizador}
+
+La implementación, caracterización experimental y certificación de la plataforma demostradora (Sección~\ref{sec:resultados_framework}) validan la solidez del marco de trabajo co-diseñado. A continuación, se detalla cómo esta base tecnológica se proyecta directamente hacia el problema central de esta investigación: la localización espacial de fuentes de ondas en tiempo real. En la Sección~\ref{subsec:infraestructura_invariable} se identifican los componentes arquitectónicos invariantes, mientras que en la Sección~\ref{subsec:sustitucion_modular_aoa_tdoa} se describe la estrategia de sustitución modular hacia arreglos de sensores y algoritmos de estimación angular.
+
+\subsection{La infraestructura base como columna vertebral invariable}
+\label{subsec:infraestructura_invariable}
+
+Un aporte central demostrado en este capítulo es el desacoplamiento estricto entre la lógica de aplicación específica y los mecanismos de transporte y gestión. La arquitectura consolidada en este marco de trabajo se mantendrá como la columna vertebral invariable del sistema en las etapas posteriores:
+
 \begin{itemize}
-    \item \textbf{Infraestructura Consolidada e Invariante:} El flujo de transporte de datos impulsado por eventos (AXI4-Stream), el empaquetado de muestras (\texttt{tlast\_generator}), el motor AXI DMA sobre el bus de 64 bits AXI-HP0, la asignación de memoria contigua en Python (\texttt{StreamingXADC}) y la carga autónoma de artefactos (\texttt{HardwareLoader}) se mantendrán como la columna vertebral invariable del sistema.
-    \item \textbf{Escalabilidad hacia la Localización de Fuentes de Ondas:} En los capítulos siguientes, el módulo de prueba de canal único de la XADC se sustituirá por arreglos geométricos de sensores multicanal e integraciones con núcleos IP de procesamiento digital de señales (DSP) en la PL (Capítulo~2 y Capítulo~3). Debido a que la tubería (\textit{pipeline}) AXI DMA y la capa PYNQ son agnósticas al tipo de dato transmitido, la adición de algoritmos de estimación de ángulo de llegada (AoA) o diferencia de tiempo de llegada (TDOA) en hardware no requerirá reestructurar la capa de distribución en software ni la interfaz de usuario.
+    \item \textbf{Transporte Determinista AXI4-Stream / AXI DMA:} El protocolo de flujo continuo basado en eventos, el delimitador dinámico de tramas (\texttt{tlast\_generator}) y la transferencia en ráfagas mediante motores AXI DMA sobre el bus de 64 bits AXI-HP0 hacia la memoria DDR3 no requerirán modificaciones estructurales.
+    
+    \item \textbf{Gestión de Memoria y Abstracción en Software:} La asignación de memoria física contigua mediante el mecanismo CMA de Linux (\texttt{pynq.allocate}) y la carga autónoma de mapas de bits (\texttt{HardwareLoader}) continuarán gestionando el flujo de datos masivo con cero sobrecarga de copia (\textit{zero-copy}).
+    
+    \item \textbf{Trazabilidad Git-a-Silicio y Flujo CI/CD:} La gestión de firmware con CERN Hog y la publicación automatizada de artefactos en GitHub Releases y PyPI asegurarán que cada iteración del localizador espacial esté estrictamente versionada.
 \end{itemize}
 
-De este modo, el marco de trabajo no solo resuelve el problema de la falta de reproducibilidad y versionado en firmware FPGA, sino que garantiza que la plataforma completa para la localización espacial de fuentes de ondas se construya sobre una base metodológica probada, modular y completamente abierta.
+\subsection{Sustitución modular de nodos hacia arreglos de sensores y algoritmos AoA/TDOA}
+\label{subsec:sustitucion_modular_aoa_tdoa}
 
-\section{Conclusiones del Capítulo}
-\label{sec:conclusiones_ch1}
+Gracias a la naturaleza componible del grafo AXI4-Stream formalizado en el Plano de Datos (Sección~\ref{subsubsec:plano_datos}), la transición desde el demostrador de instrumentación hacia el sistema completo de localización de fuentes de ondas se realizará mediante dos sustituciones modulares en la Lógica Programable (Capítulos 2 y 3):
 
 \begin{enumerate}
-    \item Se estableció una metodología de co-diseño hardware/software para instrumentación científica abierta basada en los entornos CERN Hog y AMD PYNQ, resolviendo la falta de trazabilidad y el desacoplamiento tradicional entre el desarrollo de firmware FPGA y las aplicaciones de usuario.
-    \item La integración de CERN Hog en el repositorio de hardware (\texttt{hw-xadc-dma-overlays}) permitió automatizar la construcción de proyectos en Vivado mediante scripts TCL y pipelines de CI/CD en GitHub Actions, garantizando que cada artefacto ejecutable (\texttt{.bit} y \texttt{.hwh}) esté vinculado de forma inequívoca al \textit{hash} de un commit de Git.
-    \item La capa de software (\texttt{sw-pynq-oscilloscope}), distribuida mediante PyPI, demostró la viabilidad de empaquetar plataformas SoC-FPGA como librerías estándar en Python. El módulo \texttt{HardwareLoader} elimina la necesidad de configuración manual de archivos de firmware al descargar autónomamente los mapas de bits requeridos desde los lanzamientos del repositorio de hardware.
-    \item El empaquetador VHDL diseñado (\texttt{tlast\_generator}) resolvió la limitación nativa de delimitación de paquetes del núcleo XADC, permitiendo transferencias continuas por AXI DMA hacia la memoria RAM compartida a $1.75~\text{MB/s}$ con una latencia de hardware medible a $100~\text{MHz}$ mediante el temporizador AXI.
-    \item La suite de caracterización en lazo cerrado validó la fidelidad del flujo de adquisición, alcanzando un ancho de banda analógico de $150.0~\text{kHz}$, una relación señal-ruido de $45.96~\text{dB}$ ($\text{ENOB} = 7.34~\text{bits}$), una precisión estática superior al $99.7\%$ y un despliegue gráfico fluido a $53.3~\text{FPS}$. Esta infraestructura validada servirá como la base operativa para la implementación del localizador espacial de fuentes de ondas en los capítulos posteriores.
+    \item \textbf{Sustitución del Nodo Fuente (Frontend de Adquisición Multicanal):} El digitalizador preliminar de canal único/dual (\texttt{xadc\_wiz\_0}) será reemplazado por un arreglo geométrico de transductores (micrófonos acústicos o antenas electromagnéticas) acoplados a interfaces digitales síncronas multicanal (como receptores I2S, decodificadores PDM o convertidores analógico-digitales externos de alta velocidad).
+    
+    \item \textbf{Inserción de Nodos de Transformación DSP Especializados:} En el espacio intermedio del grafo de datos se incorporarán núcleos IP dedicados para el procesamiento espacial de señales:
+    \begin{itemize}
+        \item \textit{Diferencia de Tiempo de Llegada (TDOA):} Módulos de correlación cruzada generalizada con transformada de fase (GCC-PHAT) para la estimación de retardos temporales inter-aurales en hardware.
+        \item \textit{Ángulo de Llegada (AoA):} Algoritmos de conformado de haces (\textit{beamforming}) y estimación espectral de alta resolución (como MUSIC o ESPRIT) sintetizados en la matriz de bloques DSP48E1.
+    \end{itemize}
 \end{enumerate}
+
+Dado que la tubería de transporte DMA y los controladores en Python son agnósticos al significado físico de los datos transmitidos (sean voltajes analógicos, coeficientes de correlación o vectores de potencia espacial), la adición de estos algoritmos en la PL no requerirá reestructurar la capa de distribución ni la interfaz de usuario, garantizando un desarrollo ágil, modular y libre de deuda técnica.
+
+% ==============================================================================
+% 1.5. PROYECCIÓN HACIA EL LOCALIZADOR ESPACIAL DE FUENTES DE ONDAS
+% ==============================================================================
+\section{Proyección hacia el Localizador Espacial de Fuentes de Ondas}
+\label{sec:proyeccion_localizador}
+
+La implementación, caracterización experimental y certificación de la plataforma demostradora (Sección~\ref{sec:resultados_framework}) validan la solidez del marco de trabajo co-diseñado. A continuación, se detalla cómo esta base tecnológica se proyecta directamente hacia el problema central de esta investigación: la localización espacial de fuentes de ondas en tiempo real. En la Sección~\ref{subsec:infraestructura_invariable} se identifican los componentes arquitectónicos invariantes, mientras que en la Sección~\ref{subsec:sustitucion_modular_aoa_tdoa} se describe la estrategia de sustitución modular hacia arreglos de sensores y algoritmos de estimación angular.
+
+\subsection{La infraestructura base como columna vertebral invariable}
+\label{subsec:infraestructura_invariable}
+
+Un aporte central demostrado en este capítulo es el desacoplamiento estricto entre la lógica de aplicación específica y los mecanismos de transporte y gestión. La arquitectura consolidada en este marco de trabajo se mantendrá como la columna vertebral invariable del sistema en las etapas posteriores:
+
+\begin{itemize}
+    \item \textbf{Transporte Determinista AXI4-Stream / AXI DMA:} El protocolo de flujo continuo basado en eventos, el delimitador dinámico de tramas (\texttt{tlast\_generator}) y la transferencia en ráfagas mediante motores AXI DMA sobre el bus de 64 bits AXI-HP0 hacia la memoria DDR3 no requerirán modificaciones estructurales.
+    
+    \item \textbf{Gestión de Memoria y Abstracción en Software:} La asignación de memoria física contigua mediante el mecanismo CMA de Linux (\texttt{pynq.allocate}) y la carga autónoma de mapas de bits (\texttt{HardwareLoader}) continuarán gestionando el flujo de datos masivo con cero sobrecarga de copia (\textit{zero-copy}).
+    
+    \item \textbf{Trazabilidad Git-a-Silicio y Flujo CI/CD:} La gestión de firmware con CERN Hog y la publicación automatizada de artefactos en GitHub Releases y PyPI asegurarán que cada iteración del localizador espacial esté estrictamente versionada.
+\end{itemize}
+
+\subsection{Sustitución modular de nodos hacia arreglos de sensores y algoritmos AoA/TDOA}
+\label{subsec:sustitucion_modular_aoa_tdoa}
+
+Gracias a la naturaleza componible del grafo AXI4-Stream formalizado en el Plano de Datos (Sección~\ref{subsubsec:plano_datos}), la transición desde el demostrador de instrumentación hacia el sistema completo de localización de fuentes de ondas se realizará mediante dos sustituciones modulares en la Lógica Programable (Capítulos 2 y 3):
+
+\begin{enumerate}
+    \item \textbf{Sustitución del Nodo Fuente (Frontend de Adquisición Multicanal):} El digitalizador preliminar de canal único/dual (\texttt{xadc\_wiz\_0}) será reemplazado por un arreglo geométrico de transductores (micrófonos acústicos o antenas electromagnéticas) acoplados a interfaces digitales síncronas multicanal (como receptores I2S, decodificadores PDM o convertidores analógico-digitales externos de alta velocidad).
+    
+    \item \textbf{Inserción de Nodos de Transformación DSP Especializados:} En el espacio intermedio del grafo de datos se incorporarán núcleos IP dedicados para el procesamiento espacial de señales:
+    \begin{itemize}
+        \item \textit{Diferencia de Tiempo de Llegada (TDOA):} Módulos de correlación cruzada generalizada con transformada de fase (GCC-PHAT) para la estimación de retardos temporales inter-aurales en hardware.
+        \item \textit{Ángulo de Llegada (AoA):} Algoritmos de conformado de haces (\textit{beamforming}) y estimación espectral de alta resolución (como MUSIC o ESPRIT) sintetizados en la matriz de bloques DSP48E1.
+    \end{itemize}
+\end{enumerate}
+
+Dado que la tubería de transporte DMA y los controladores en Python son agnósticos al significado físico de los datos transmitidos (sean voltajes analógicos, coeficientes de correlación o vectores de potencia espacial), la adición de estos algoritmos en la PL no requerirá reestructurar la capa de distribución ni la interfaz de usuario, garantizando un desarrollo ágil, modular y libre de deuda técnica.
+
+% ==============================================================================
+% BIBLIOGRAFÍA (Solo se imprime si se compila este subarchivo de forma aislada)
+% ==============================================================================
+\ifSubfilesClassLoaded{%
+    \printbibliography
+}{}
 
 \end{document}
