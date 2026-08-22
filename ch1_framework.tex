@@ -1,5 +1,8 @@
 \documentclass[standalone]{subfiles}
 
+\setcounter{secnumdepth}{3}
+\emergencystretch=2em
+
 \begin{document}
 
 \chapter{Marco de Trabajo (Framework)}
@@ -59,7 +62,7 @@ Los sistemas en chip basados en FPGA heterogéneos, ejemplificados por la famili
 \begin{enumerate}
     \item \textbf{Sistema de Procesamiento (Processing System - PS):} Compuesto por una unidad de microprocesador dedicada (Hard Dual-Core ARM Cortex-A9 MPCore) que opera hasta $650~\text{MHz}$, con memorias caché L1/L2, controladores de periféricos estándar (Ethernet, USB, UART, SDIO) y un controlador de memoria dinámica DDR3 integrada. El PS ejecuta un sistema operativo embebido (GNU/Linux), proporcionando capacidades avanzadas de red, sistemas de archivos e interfaces de usuario de alto nivel.
     
-    \item \textbf{Lógica Programable (Programmable Logic - PL):} Una matriz reconfigurable equivalente a una FPGA Artix-7 (dispositivo \texttt{xc7z020clg400-1} en la tarjeta PYNQ-Z2), compuesta por bloques lógicos configurables (CLB: 53\,200 tablas de búsqueda LUT de 6 entradas y 106\,400 biestables Flip-Flops), 220 rebanadas de procesamiento digital de señales (DSP48E1) y 4.9~Mb de memoria en bloque integrada (Block RAM).
+    \item \textbf{Lógica Programable (Programmable Logic - PL):} Matriz reconfigurable equivalente a una FPGA Artix-7 (dispositivo Zynq \texttt{xc7z020}), compuesta por bloques lógicos configurables (CLB: 53\,200 tablas LUT de 6 entradas y 106\,400 biestables Flip-Flops), 220 rebanadas de procesamiento digital de señales (DSP48E1) y 4.9~Mb de memoria en bloque integrada (Block RAM).
 \end{enumerate}
 
 La ventaja fundamental de esta arquitectura radica en el acoplamiento estrecho entre ambos dominios mediante canales dedicados de interconexión interna de silicio, eliminando los cuellos de botella de ancho de banda y latencia inherentes a los buses externos tradicionales (como PCIe, SPI o USB).
@@ -103,7 +106,7 @@ Para lograr transferencias de datos masivas sin sobrecargar a la CPU con operaci
 \section{Metodología: Arquitectura de Tres Planos y Ciclo de Vida CI/CD}
 \label{sec:metodologia_framework}
 
-La metodología propuesta articula el desarrollo de firmware y software en una estructura estrictamente desacoplada. Se expone la estrategia de repositorios duales (Sección~\ref{subsec:metodologia_dual_repo}) y se formaliza el modelo de tres planos en la Sección~\ref{subsec:modelo_tres_planos}, descomponiendo el sistema en Plano de Datos (\ref{subsubsec:plano_datos}), Plano de Control (\ref{subsubsec:plano_control}) y Plano de Gestión (\ref{subsubsec:plano_gestion}). Finalmente, se detallan los ganchos de automatización en Vivado y extracción de contexto (Sección~\ref{subsec:vivado_hooks_context}), el flujo de integración continua (Sección~\ref{subsec:flujo_cicd_empaquetado}) y el protocolo de depuración en lazo cerrado con instrumental externo~\cite{digilent_waveforms_sdk} (Sección~\ref{subsec:protocolo_hil}).
+La metodología propuesta articula el desarrollo de firmware y software en una estructura estrictamente desacoplada. Se expone la estrategia de repositorios duales (Sección~\ref{subsec:metodologia_dual_repo}) y se formaliza el modelo de tres planos en la Sección~\ref{subsec:modelo_tres_planos}, descomponiendo el sistema en Plano de Datos (Sección~\ref{subsubsec:plano_datos}), Plano de Control (Sección~\ref{subsubsec:plano_control}) y Plano de Gestión (Sección~\ref{subsubsec:plano_gestion}). Finalmente, se detallan los ganchos de automatización en Vivado y extracción de contexto (Sección~\ref{subsec:vivado_hooks_context}), el flujo de integración continua (Sección~\ref{subsec:flujo_cicd_empaquetado}) y el protocolo de depuración en lazo cerrado con instrumental externo~\cite{digilent_waveforms_sdk} (Sección~\ref{subsec:protocolo_hil}).
 
 \subsection{Estrategia de Repositorios Desacoplados (Dual-Repo Model)}
 \label{subsec:metodologia_dual_repo}
@@ -165,16 +168,16 @@ El Plano de Datos constituye la ruta de transporte y procesamiento de señales e
 
 El Plano de Control permite al Sistema de Procesamiento (PS) gobernar el comportamiento de los nodos de la PL en tiempo de ejecución mediante transacciones mapeadas en memoria (MMIO) sobre el bus AXI4-Lite (\texttt{M\_AXI\_GP0} a $100~\text{MHz}$). 
 
-A través del conmutador AXI SmartConnect (\texttt{axi\_smc}), se distribuye un mapa de memoria estructurado que asigna registros de 32 bits a cada periférico (direcciones base: DMA Tiempo \texttt{0x40400000}, DMA FFT \texttt{0x40410000}, Temporizador \texttt{0x42800000}, XADC \texttt{0x43C00000} y Unidad de Disparo \texttt{0x43C10000}).
+A través del conmutador AXI SmartConnect (\texttt{axi\_smc}), se distribuye el mapa de registros para los periféricos del sistema: DMA de tiempo (\texttt{0x40400000}), DMA de FFT (\texttt{0x40410000}), temporizador (\texttt{0x42800000}), XADC (\texttt{0x43C00000}) y la unidad de disparo (\texttt{0x43C10000}).
 
-El núcleo \texttt{axis\_trigger\_unit} actúa como un concentrador de control dinámico: al escribir un comando desde Python, propaga en tiempo real señales de control hacia otros bloques (ej. \texttt{packet\_size\_out[15:0]} hacia \texttt{tlast\_generator}, \texttt{decim\_factor\_out[1:0]} hacia \texttt{axis\_decimator} y \texttt{m\_axis\_fft\_config} hacia \texttt{xfft\_0}), permitiendo alterar el comportamiento del sistema sin reiniciar la FPGA.
+El núcleo \texttt{axis\_trigger\_unit} actúa como concentrador de control dinámico. A partir de los comandos recibidos desde Python, genera y propaga buses de control en tiempo real hacia los demás módulos de la PL: el tamaño de paquete (\texttt{packet\_size\_out}) hacia \texttt{tlast\_generator}, el factor de diezmado (\texttt{decim\_factor\_out}) hacia \texttt{axis\_decimator} y la configuración de transformada (\texttt{m\_axis\_fft\_config}) hacia el bloque \texttt{xfft\_0}.
 
 \subsubsection{Plano de Gestión (Lifecycle Plane): Trazabilidad Git SHA y Despliegue}
 \label{subsubsec:plano_gestion}
 
 El Plano de Gestión asegura la trazabilidad estricta y el despliegue automático del ecosistema. En la etapa de síntesis, CERN Hog inyecta los genéricos \texttt{GLOBAL\_SHA} y \texttt{GLOBAL\_VER} en el \textit{wrapper} VHDL de nivel superior (\texttt{xadc\_wrapper.vhd}), embebiendo de forma inmutable el hash del commit de Git en los registros del hardware.
 
-En la capa de software, la clase \texttt{HardwareLoader} inspecciona el archivo \texttt{hardware.json}, detecta automáticamente el modelo de la tarjeta conectada a través de la variable \texttt{\$BOARD}, consulta la API de lanzamientos de GitHub (\textit{GitHub Releases}), descarga los artefactos binarios (\texttt{.bit} y \texttt{.hwh}) en un directorio de caché local (\texttt{\textasciitilde/.cache/pynq\_oscilloscope/}) y programa la firma en la FPGA de manera transparente.
+En la capa de software, la clase \texttt{HardwareLoader} inspecciona el archivo \texttt{hardware.json}, detecta automáticamente el modelo de la tarjeta conectada a través de la variable \texttt{\$BOARD}, consulta la API de lanzamientos de GitHub (\textit{GitHub Releases}), descarga los artefactos binarios (\texttt{.bit} y \texttt{.hwh}) en un directorio de caché local (\texttt{\textasciitilde/.cache/}\allowbreak\texttt{pynq\_oscilloscope/}) y programa la firma en la FPGA de manera transparente.
 
 \subsection{Automatización de Hooks en Vivado y Extracción de Contexto (\textit{Context Harvesting})}
 \label{subsec:vivado_hooks_context}
@@ -223,32 +226,45 @@ Para validar nuevas características funcionales de forma iterativa y sin riesgo
 \section{Resultados: Validación Experimental del Framework}
 \label{sec:resultados_framework}
 
-La evaluación experimental del framework valida sus garantías teóricas de no-bloqueo y su viabilidad práctica como plataforma de desarrollo ágil. En la Sección~\ref{subsec:analisis_transporte} se analizan analíticamente las cotas de transporte de datos hacia la memoria RAM compartida, mientras que en la Sección~\ref{subsec:suite_certificacion_hil} se describe la suite automatizada de certificación HIL. Como caso de estudio integral, en la Sección~\ref{subsec:demostrador_instrumento} se presenta la plataforma de instrumentación multi-dominio (\ref{subsubsec:dsp_pl}, \ref{subsubsec:ui_reactiva} y \ref{subsubsec:metricas_linea_base}). Por último, en la Sección~\ref{subsec:modelo_forking} se evalúa cuantitativamente la reutilización de código y la extensibilidad del framework hacia nuevos desarrollos.
+La evaluación experimental del framework valida sus garantías teóricas de no-bloqueo y su viabilidad práctica como plataforma de desarrollo ágil. En la Sección~\ref{subsec:analisis_transporte} se analizan analíticamente las cotas de transporte de datos hacia la memoria RAM compartida, mientras que en la Sección~\ref{subsec:suite_certificacion_hil} se describe la suite automatizada de certificación HIL. Como caso de estudio integral, en la Sección~\ref{subsec:demostrador_instrumento} se presenta la plataforma de instrumentación multi-dominio (Secciones~\ref{subsubsec:dsp_pl}, \ref{subsubsec:ui_reactiva} y \ref{subsubsec:metricas_linea_base}). Por último, en la Sección~\ref{subsec:modelo_forking} se evalúa cuantitativamente la reutilización de código y la extensibilidad del framework hacia nuevos desarrollos.
 
 \subsection{Análisis Analítico de Rendimiento y Cotas de Transporte (PL -- PS)}
 \label{subsec:analisis_transporte}
 
-La viabilidad de un sistema de adquisición de datos en tiempo real radica en garantizar que la velocidad de generación de muestras en la lógica programable jamás supere la capacidad de evacuación del bus de memoria hacia la memoria principal (DDR). La tasa de transferencia generada por el grafo de adquisición ($\text{Throughput}_{\text{DAQ}}$) frente al límite teórico de transferencia del puerto maestro AXI-HP0 ($\text{Throughput}_{\text{AXI-HP0}}$) se modela como:
+La viabilidad de un sistema de adquisición de datos en tiempo real radica en garantizar que la tasa de generación de muestras en la lógica programable no supere la capacidad de transferencia del bus de memoria hacia la memoria principal (DDR). 
 
+La tasa de datos generada por el flujo de adquisición, denotada como $R_{\text{DAQ}}$, se modela en función de los parámetros del sistema:
 \begin{equation}
-    \text{Throughput}_{\text{DAQ}} = N_{\text{ch}} \cdot f_s \cdot B_{\text{sample}} \quad \ll \quad \text{Throughput}_{\text{AXI-HP0}} = W_{\text{bus}} \cdot f_{\text{aclk}} = 800~\text{MB/s}
-    \label{eq:throughput_bounds}
+    R_{\text{DAQ}} = N_{\text{ch}} \cdot f_s \cdot w_s
+    \label{eq:throughput_daq}
 \end{equation}
-donde $N_{\text{ch}}$ representa el número de canales analógicos activos, $f_s$ es la frecuencia de muestreo por canal, $B_{\text{sample}}$ es el ancho de palabra digitalizado en bytes ($2~\text{B}$ para 16 bits), $W_{\text{bus}} = 8~\text{B}$ ($64~\text{bits}$) y $f_{\text{aclk}} = 100~\text{MHz}$.
-
-Para una configuración de muestreo dual simultáneo a $f_s = 500~\text{kSPS}$ por canal ($1.0~\text{MSPS}$ agregado), la tasa de datos generada es:
+donde $N_{\text{ch}}$ es el número de canales analógicos activos, $f_s$ es la frecuencia de muestreo por canal y $w_s$ es el ancho de palabra ($w_s = 2~\text{B}$ para muestras de 16 bits). Para una adquisición dual simultánea a $f_s = 500~\text{kSPS}$ por canal ($1.0~\text{MSPS}$ agregado), la tasa generada es:
 \begin{equation}
-    \text{Throughput}_{\text{DAQ}} = 2 \times (500 \times 10^3~\text{muestras/s}) \times 2~\text{B/muestra} = 2.00~\text{MB/s}
+    R_{\text{DAQ}} = 2 \times 500~\text{kSPS} \times 2~\text{B} = 2.00~\text{MB/s}
+    \label{eq:throughput_numeric}
 \end{equation}
 
-Al comparar este valor con la capacidad del puerto AXI-HP0 ($800~\text{MB/s}$), se obtiene una utilización del bus de apenas el $0.25\%$. Dado que la transferencia se ejecuta mediante el motor AXI DMA en modo directo sobre memoria contigua (CMA) sin intervención de la CPU, **el framework garantiza analíticamente cero pérdidas de paquetes por saturación de bus**, preservando el determinismo temporal con una resolución medible de $10~\text{ns}$ ($100~\text{MHz}$) a través del bloque \texttt{axi\_timer\_0}.
+Por su parte, el ancho de banda teórico del bus maestro AXI-HP0 ($B_{\text{HP0}}$) que interconecta el motor DMA con el controlador de memoria DDR3 está dado por:
+\begin{equation}
+    B_{\text{HP0}} = W_{\text{bus}} \cdot f_{\text{aclk}} = 8~\text{B} \times 100~\text{MHz} = 800~\text{MB/s}
+    \label{eq:bandwidth_hp0}
+\end{equation}
+donde $W_{\text{bus}} = 64~\text{bits} = 8~\text{B}$ y $f_{\text{aclk}} = 100~\text{MHz}$.
+
+Al contrastar ambas magnitudes, se evidencia la condición de no-bloqueo:
+\begin{equation}
+    R_{\text{DAQ}} \ll B_{\text{HP0}} \quad \left( \frac{R_{\text{DAQ}}}{B_{\text{HP0}}} = \frac{2.00~\text{MB/s}}{800~\text{MB/s}} = 0.25\% \right)
+    \label{eq:ratio_bound}
+\end{equation}
+
+Dado que la transferencia se ejecuta mediante el motor AXI DMA en modo directo sobre memoria contigua (CMA) sin intervención de la CPU, \textbf{el framework garantiza analíticamente cero pérdidas de paquetes por saturación de bus}, preservando el determinismo temporal con una resolución medible de $10~\text{ns}$ ($100~\text{MHz}$) a través del bloque \texttt{axi\_timer\_0}.
 
 \subsection{Suite Automatizada de Certificación Hardware-in-the-Loop (HIL)}
 \label{subsec:suite_certificacion_hil}
 
 Para evaluar de forma reproducible cualquier versión de firmware o derivación del framework sin requerir costoso instrumental de banco dedicado, se implementó una suite de pruebas automatizadas en lazo cerrado (\textit{Hardware-in-the-Loop} - HIL) mediante el instrumento multifunción Digilent Analog Discovery 3 (AD3) controlado por la librería \texttt{pydwf}~\cite{digilent_waveforms_sdk}.
 
-La suite (\texttt{04\_automated\_performance\_benchmark.ipynb}) ejecuta la generación analógica en un hilo desacoplado (\textit{daemon thread}) a través de la clase \texttt{AD3SignalGenerator} e inspecciona cuatro criterios de certificación estándar:
+La suite (\texttt{04\_automated\_performance\_}\allowbreak\texttt{benchmark.ipynb}) ejecuta la generación analógica en un hilo desacoplado (\textit{daemon thread}) a través de la clase \texttt{AD3SignalGenerator} e inspecciona cuatro criterios de certificación estándar:
 \begin{enumerate}
     \item \textbf{Fidelidad Dinámica de Señal:} Inyección de barridos de frecuencia senoidales (desde $100~\text{Hz}$ hasta $250~\text{kHz}$) para medir la respuesta en frecuencia a $-3~\text{dB}$, la relación señal a ruido (SNR), la distorsión armónica total (THD) y el número efectivo de bits (ENOB).
     \item \textbf{Determinismo Temporal y Jitter:} Medición del intervalo de tiempo transcurrido entre la aserción de la señal \texttt{TLAST} por hardware y la notificación de finalización de ráfaga DMA en el software.
@@ -336,18 +352,20 @@ Para demostrar que el framework reduce drásticamente el tiempo de desarrollo en
 \centering
 \caption{Evaluación cuantitativa del factor de reutilización de código e infraestructura.}
 \label{tab:reutilizacion_codigo}
-\begin{tabular}{lccl}
-\hline
-\textbf{Componente del Sistema} & \textbf{Líneas Base} & \textbf{Reutilización} & \textbf{Mecanismo de Herencia} \\ \hline
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Componente del Sistema} & \textbf{Líneas Base} & \textbf{Reutilización} & \textbf{Mecanismo de Herencia} \\ \midrule
 Infraestructura AXI DMA y SmartConnect & VHDL / BD & $100\%$ & Heredado intacto en PL \\
 Delimitador Dinámico (\texttt{tlast\_generator}) & VHDL & $100\%$ & Heredado intacto en PL \\
 Gestor de Firmware (CERN Hog) & Scripts TCL & $95\%$ & Clonado y adaptado \\
 Pipeline CI/CD (GitHub Actions) & YAML & $95\%$ & Clonado y adaptado \\
 Carga Dinámica (\texttt{HardwareLoader}) & Python & $100\%$ & Heredado intacto en PS \\
 Gestión de Memoria Contigua (CMA) & Python & $100\%$ & Heredado intacto en PS \\
-Nodos DSP Especializados & VHDL / IP & Variable & Específico del dominio \\ \hline
-\textbf{Aceleración en Tiempo de Puesta en Marcha} & --- & $\mathbf{> 10\times}$ & \textbf{De semanas a horas} \\ \hline
-\end{tabular}
+Nodos DSP Especializados & VHDL / IP & Variable & Específico del dominio \\ \midrule
+\textbf{Aceleración en Tiempo de Puesta en Marcha} & --- & $\mathbf{> 10\times}$ & \textbf{De semanas a horas} \\ \bottomrule
+\end{tabular}%
+}
 \end{table}
 
 \subsubsection{Integración de Nuevas Instancias y Módulos DAQ}
@@ -394,42 +412,24 @@ Gracias a la naturaleza componible del grafo AXI4-Stream formalizado en el Plano
 Dado que la tubería de transporte DMA y los controladores en Python son agnósticos al significado físico de los datos transmitidos (sean voltajes analógicos, coeficientes de correlación o vectores de potencia espacial), la adición de estos algoritmos en la PL no requerirá reestructurar la capa de distribución ni la interfaz de usuario, garantizando un desarrollo ágil, modular y libre de deuda técnica.
 
 % ==============================================================================
-% 1.5. PROYECCIÓN HACIA EL LOCALIZADOR ESPACIAL DE FUENTES DE ONDAS
+% 1.6. CONCLUSIONES DEL CAPÍTULO
 % ==============================================================================
-\section{Proyección hacia el Localizador Espacial de Fuentes de Ondas}
-\label{sec:proyeccion_localizador}
-
-La implementación, caracterización experimental y certificación de la plataforma demostradora (Sección~\ref{sec:resultados_framework}) validan la solidez del marco de trabajo co-diseñado. A continuación, se detalla cómo esta base tecnológica se proyecta directamente hacia el problema central de esta investigación: la localización espacial de fuentes de ondas en tiempo real. En la Sección~\ref{subsec:infraestructura_invariable} se identifican los componentes arquitectónicos invariantes, mientras que en la Sección~\ref{subsec:sustitucion_modular_aoa_tdoa} se describe la estrategia de sustitución modular hacia arreglos de sensores y algoritmos de estimación angular.
-
-\subsection{La infraestructura base como columna vertebral invariable}
-\label{subsec:infraestructura_invariable}
-
-Un aporte central demostrado en este capítulo es el desacoplamiento estricto entre la lógica de aplicación específica y los mecanismos de transporte y gestión. La arquitectura consolidada en este marco de trabajo se mantendrá como la columna vertebral invariable del sistema en las etapas posteriores:
-
-\begin{itemize}
-    \item \textbf{Transporte Determinista AXI4-Stream / AXI DMA:} El protocolo de flujo continuo basado en eventos, el delimitador dinámico de tramas (\texttt{tlast\_generator}) y la transferencia en ráfagas mediante motores AXI DMA sobre el bus de 64 bits AXI-HP0 hacia la memoria DDR3 no requerirán modificaciones estructurales.
-    
-    \item \textbf{Gestión de Memoria y Abstracción en Software:} La asignación de memoria física contigua mediante el mecanismo CMA de Linux (\texttt{pynq.allocate}) y la carga autónoma de mapas de bits (\texttt{HardwareLoader}) continuarán gestionando el flujo de datos masivo con cero sobrecarga de copia (\textit{zero-copy}).
-    
-    \item \textbf{Trazabilidad Git-a-Silicio y Flujo CI/CD:} La gestión de firmware con CERN Hog y la publicación automatizada de artefactos en GitHub Releases y PyPI asegurarán que cada iteración del localizador espacial esté estrictamente versionada.
-\end{itemize}
-
-\subsection{Sustitución modular de nodos hacia arreglos de sensores y algoritmos AoA/TDOA}
-\label{subsec:sustitucion_modular_aoa_tdoa}
-
-Gracias a la naturaleza componible del grafo AXI4-Stream formalizado en el Plano de Datos (Sección~\ref{subsubsec:plano_datos}), la transición desde el demostrador de instrumentación hacia el sistema completo de localización de fuentes de ondas se realizará mediante dos sustituciones modulares en la Lógica Programable (Capítulos 2 y 3):
+\section{Conclusiones del Capítulo}
+\label{sec:conclusiones_ch1}
 
 \begin{enumerate}
-    \item \textbf{Sustitución del Nodo Fuente (Frontend de Adquisición Multicanal):} El digitalizador preliminar de canal único/dual (\texttt{xadc\_wiz\_0}) será reemplazado por un arreglo geométrico de transductores (micrófonos acústicos o antenas electromagnéticas) acoplados a interfaces digitales síncronas multicanal (como receptores I2S, decodificadores PDM o convertidores analógico-digitales externos de alta velocidad).
+    \item \textbf{Consolidación de una Metodología de Co-Diseño de Tres Planos:} Se formuló y validó una arquitectura formal dividida en Plano de Datos (Grafo AXI4-Stream componible), Plano de Control (Espacio MMIO dinámico en AXI4-Lite) y Plano de Gestión (DevOps con CERN Hog y PyPI). Esta separación resuelve el acoplamiento rígido tradicional entre el diseño de hardware en FPGA y las aplicaciones de usuario en física experimental.
     
-    \item \textbf{Inserción de Nodos de Transformación DSP Especializados:} En el espacio intermedio del grafo de datos se incorporarán núcleos IP dedicados para el procesamiento espacial de señales:
-    \begin{itemize}
-        \item \textit{Diferencia de Tiempo de Llegada (TDOA):} Módulos de correlación cruzada generalizada con transformada de fase (GCC-PHAT) para la estimación de retardos temporales inter-aurales en hardware.
-        \item \textit{Ángulo de Llegada (AoA):} Algoritmos de conformado de haces (\textit{beamforming}) y estimación espectral de alta resolución (como MUSIC o ESPRIT) sintetizados en la matriz de bloques DSP48E1.
-    \end{itemize}
+    \item \textbf{Trazabilidad Git-a-Silicio y Despliegue Autónomo:} La integración de CERN Hog en el repositorio de hardware (\texttt{hw-xadc-dma-overlays}) garantizó que cada mapa de bits generado por los pipelines de CI/CD en GitHub Actions posea embebido de forma inmutable el hash SHA de Git y la versión semántica. En el software, la clase \texttt{HardwareLoader} del paquete \texttt{pynq-oscilloscope} demostró la viabilidad de autoconfigurar y descargar dinámicamente los mapas de bits requeridos sin intervención manual del usuario.
+    
+    \item \textbf{Garantía Analítica de Transporte y Determinismo Temporal:} Se demostró analítica y experimentalmente que la tasa de generación de muestras digitalizadas ($R_{\text{DAQ}} = 2.00~\text{MB/s}$ a $1.0~\text{MSPS}$ agregado) ocupa menos del $0.25\%$ de la capacidad teórica del bus maestro AXI-HP0 ($B_{\text{HP0}} = 800~\text{MB/s}$), asegurando transferencias continuas por DMA hacia la memoria DDR sin riesgo de desbordamiento ni cuellos de botella en la CPU, con una resolución de temporización medible de $10~\text{ns}$ ($100~\text{MHz}$) vía \texttt{axi\_timer\_0}.
+    
+    \item \textbf{Aceleración de Coprocesamiento DSP en Tiempo Real:} El grafo de procesamiento en la Lógica Programable validó la integración síncrona de filtrado por hardware con bloqueo de fase (\texttt{axis\_trigger\_unit}), diezmado dinámico (\texttt{axis\_decimator}) y análisis espectral de alta velocidad (\texttt{xfft\_0} de 2048 puntos y magnitud polar con \texttt{cordic\_0} en $\approx 20.5~\mu\text{s}$), demostrando que es posible insertar etapas de cómputo en la PL sin alterar la interfaz de transporte DMA.
+    
+    \item \textbf{Certificación HIL y Usabilidad Reactiva:} La suite de caracterización en lazo cerrado con el Analog Discovery 3 certificó una respuesta analógica a $-3~\text{dB}$ de $150.0~\text{kHz}$, $\text{SNR} = 45.96~\text{dB}$ ($\text{ENOB} = 7.34~\text{bits}$) y una precisión estática $> 99.7\%$. El cuadro de mando en Jupyter demostró renderizado interactivo fluido a $30\text{--}53~\text{FPS}$ mediante enlaces de cero latencia y actualizaciones por lotes atómicas.
+    
+    \item \textbf{Extensibilidad y Preparación para la Localización de Ondas:} La evaluación cuantitativa del modelo de derivación demostró una reutilización superior al $80\%$ de la base de código (DMA, CMA, TLAST, CI/CD y cargador de hardware), acelerando en más de $10\times$ el tiempo de puesta en marcha de futuros desarrollos. Esta infraestructura invariante servirá como la plataforma operativa para la integración de arreglos de sensores y algoritmos de estimación angular (AoA/TDOA) en los capítulos siguientes.
 \end{enumerate}
-
-Dado que la tubería de transporte DMA y los controladores en Python son agnósticos al significado físico de los datos transmitidos (sean voltajes analógicos, coeficientes de correlación o vectores de potencia espacial), la adición de estos algoritmos en la PL no requerirá reestructurar la capa de distribución ni la interfaz de usuario, garantizando un desarrollo ágil, modular y libre de deuda técnica.
 
 % ==============================================================================
 % BIBLIOGRAFÍA (Solo se imprime si se compila este subarchivo de forma aislada)
